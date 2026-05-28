@@ -1,6 +1,9 @@
 {
-	"Releases":
-	[
-		{"Id": "UnityModManager", "Version": "0.32.4", "DownloadUrl": "https://www.dropbox.com/s/wt18wcq5six02ku/umm_update.zip?dl=1"}
+	"Releases": [
+		{
+			"Id": "UnityModManager",
+			"Version": "0.33.0",
+			"DownloadUrl": "https://github.com/imnyang/unity-mod-manager/releases/download/v0.33.0/UMM_0.33.0.zip"
+		}
 	]
 }

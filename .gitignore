@@ -3,3 +3,4 @@
 */bin
 .vs
 */*.csproj.user
+.idea
