@@ -40,6 +40,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- This resx is empty. Core MSBuild cannot run the .NET 3.5 ResGen tool. -->
+    <EmbeddedResource Remove="Properties\Resources.resx" Condition="'$(MSBuildRuntimeType)' == 'Core'" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="UnityEngine">
       <HintPath>..\lib\UnityEngine.dll</HintPath>
     </Reference>

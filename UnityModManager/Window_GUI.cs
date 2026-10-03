@@ -32,7 +32,7 @@ namespace UnityModManagerNet
 
                 private bool Recalculating
                 {
-                    get { return mRecalculateFrame == Time.frameCount; }
+                    get { return mWidth <= 0 || mHeight <= 0 || mRecalculateFrame == Time.frameCount; }
                 }
 
                 private bool mOpened;
@@ -71,7 +71,7 @@ namespace UnityModManagerNet
                 {
                     if (Recalculating)
                     {
-                        mWindowRect = GUILayout.Window(mId, mWindowRect, WindowFunction, "", window);
+                        mWindowRect = CompatibilityWindow(mWindowRect, WindowFunction, mId, Params.Width ?? Scale(400), Params.Height ?? Math.Max(1, Screen.height - MARGIN * 2));
                         if (mWindowRect.width > 0)
                         {
                             mWidth = (int)(Math.Min(Params.Width ?? mWindowRect.width, Screen.width - MARGIN * 2));
@@ -82,8 +82,7 @@ namespace UnityModManagerNet
                     }
                     else
                     {
-                        mWindowRect = GUILayout.Window(mId, mWindowRect, WindowFunction, "", window, GUILayout.Width(mWidth), GUILayout.Height(mHeight + 10));
-                        GUI.BringWindowToFront(mId);
+                        mWindowRect = CompatibilityWindow(mWindowRect, WindowFunction, mId, mWidth, mHeight + 10);
                     }
                 }
 
@@ -103,6 +102,7 @@ namespace UnityModManagerNet
                 internal void Reset()
                 {
                     mRecalculateFrame = Time.frameCount;
+                    mWidth = mHeight = 0;
                     mWindowRect = new Rect(-9000, 0, 0, 0);
                 }
 

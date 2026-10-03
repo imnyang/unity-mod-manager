@@ -1,10 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using UnityEngine.Events;
-using UnityEngine.UI;
 using HarmonyLib;
 
 namespace UnityModManagerNet
@@ -63,7 +61,6 @@ namespace UnityModManagerNet
             private Rect mWindowRect = new Rect(0, 0, 0, 0);
             private Vector2 mWindowSize = Vector2.zero;
             private Vector2 mExpectedWindowSize = Vector2.zero;
-            private Resolution mCurrentResolution;
 
             private GUIContent mTooltip = null;
 
@@ -115,6 +112,7 @@ namespace UnityModManagerNet
             private void Start()
             {
                 CalculateWindowPos();
+                CreateUGUI();
                 if (string.IsNullOrEmpty(Config.UIStartingPoint))
                 {
                     FirstLaunch();
@@ -128,6 +126,9 @@ namespace UnityModManagerNet
             private void OnDestroy()
             {
                 Logger.Log("Destroying when exit.");
+                DisposeUGUI();
+                if (mInstance == this)
+                    mInstance = null;
                 SaveSettingsAndParams();
                 Logger.WriteBuffers();
             }
@@ -165,15 +166,21 @@ namespace UnityModManagerNet
                     }
                 }
 
-                if (Params.Hotkey.Up() || Param.DefaultHotkey.Up())
+                var capturingHotkey = mCapturedHotkey != null;
+                UpdateUGUI();
+
+                if (!capturingHotkey && (Params.Hotkey.Up() || Param.DefaultHotkey.Up()))
                 {
                     ToggleWindow();
                 }
 
-                if (mOpened && Param.EscapeHotkey.Up())
+                if (!capturingHotkey && mOpened && Param.EscapeHotkey.Up())
                 {
                     ToggleWindow();
                 }
+
+                if (capturingHotkey)
+                    return;
 
                 foreach (var mod in modEntries)
                 {
@@ -306,20 +313,28 @@ namespace UnityModManagerNet
             {
                 GUI.skin.font = Font.CreateDynamicFontFromOSFont(Params.UIFont, Scale(globalFontSize));
                 GUI.skin.label.clipping = TextClipping.Overflow;
-                GUI.skin.button.padding = new RectOffset(Scale(10), Scale(10), Scale(3), Scale(3));
+                GUI.skin.button.padding = new RectOffset(Scale(10), Scale(10), Scale(7), Scale(7));
+                GUI.skin.textField.padding = GUI.skin.textArea.padding = new RectOffset(Scale(9), Scale(9), Scale(3), Scale(3));
+                foreach (var style in new[] { GUI.skin.label, GUI.skin.button, GUI.skin.toggle, GUI.skin.textField, GUI.skin.textArea })
+                    foreach (var state in new[] { style.normal, style.hover, style.active, style.focused,
+                        style.onNormal, style.onHover, style.onActive, style.onFocused })
+                        state.textColor = UGUITheme.Text;
                 //GUI.skin.button.margin = RectOffset(Scale(4), Scale(2));
 
-                GUI.skin.horizontalSlider.fixedHeight = Scale(12);
+                GUI.skin.horizontalSlider.fixedHeight = Scale(28);
                 GUI.skin.horizontalSlider.border = RectOffset(3, 0);
                 GUI.skin.horizontalSlider.padding = RectOffset(Scale(-1), 0);
                 GUI.skin.horizontalSlider.margin = RectOffset(Scale(4), Scale(8));
 
-                GUI.skin.horizontalSliderThumb.fixedHeight = Scale(12);
+                GUI.skin.horizontalSliderThumb.fixedHeight = Scale(20);
+                GUI.skin.horizontalSliderThumb.fixedWidth = Scale(12);
                 GUI.skin.horizontalSliderThumb.border = RectOffset(4, 0);
                 GUI.skin.horizontalSliderThumb.padding = RectOffset(Scale(7), 0);
                 GUI.skin.horizontalSliderThumb.margin = RectOffset(0);
 
                 GUI.skin.toggle.margin.left = Scale(10);
+                GUI.skin.toggle.padding.left = Scale(28);
+                GUI.skin.toggle.padding.top = GUI.skin.toggle.padding.bottom = Scale(7);
 
                 window.padding = RectOffset(Scale(5));
                 h1.fontSize = Scale(16);
@@ -327,7 +342,7 @@ namespace UnityModManagerNet
                 h2.fontSize = Scale(13);
                 h2.margin = RectOffset(0, Scale(3));
                 button.fontSize = Scale(13);
-                button.padding = RectOffset(Scale(30), Scale(5));
+                button.padding = RectOffset(Scale(30), Scale(7));
 
                 int iconHeight = 28;
                 settings.fixedWidth = Scale(24);
@@ -342,19 +357,36 @@ namespace UnityModManagerNet
                 question.fixedHeight = Scale(11);
                 question.margin = RectOffset(0, 9);
 
-                mColumns.Clear();
-                foreach (var column in mOriginColumns)
-                {
-                    mColumns.Add(new Column { name = column.name, width = Scale(column.width), expand = column.expand, skip = column.skip });
-                }
             }
 
             private void OnGUI()
             {
+                if (mGUIBridge == null)
+                    return;
+                mGUIBridge.BeginFrame();
+                try
+                {
+                    DrawGUICompatibility();
+                }
+                finally
+                {
+                    mGUIBridge.EndFrame();
+                }
+            }
+
+            private void DrawGUICompatibility()
+            {
+                if (Event.current.type == EventType.Repaint)
+                    mTooltip = null;
                 if (!mInit)
                 {
                     mInit = true;
                     PrepareGUI();
+                    ScaleGUI();
+                }
+                if (mUIScaleChanged)
+                {
+                    mUIScaleChanged = false;
                     ScaleGUI();
                 }
 
@@ -393,28 +425,7 @@ namespace UnityModManagerNet
                     }
                 }
 
-                if (mOpened)
-                {
-                    if (mCurrentResolution.width != Screen.currentResolution.width || mCurrentResolution.height != Screen.currentResolution.height)
-                    {
-                        mCurrentResolution = Screen.currentResolution;
-                        CalculateWindowPos();
-                    }
-                    if (mUIScaleChanged)
-                    {
-                        mUIScaleChanged = false;
-                        ScaleGUI();
-                    }
-                    var backgroundColor = GUI.backgroundColor;
-                    var color = GUI.color;
-                    GUI.backgroundColor = Color.white;
-                    GUI.color = Color.white;
-                    mWindowRect = GUILayout.Window(0, mWindowRect, WindowFunction, "", window, GUILayout.Height(mWindowSize.y));
-                    mWindowRect.x = (int)mWindowRect.x;
-                    mWindowRect.y = (int)mWindowRect.y;
-                    GUI.backgroundColor = backgroundColor;
-                    GUI.color = color;
-                }
+                RenderModOptions();
 
                 foreach (var mod in modEntries)
                 {
@@ -430,31 +441,17 @@ namespace UnityModManagerNet
                         }
                     }
                 }
+                if (mTooltip != null && Event.current.type == EventType.Repaint)
+                {
+                    var size = tooltipBox.CalcSize(mTooltip) + Vector2.one * 10;
+                    var position = Event.current.mousePosition;
+                    GUI.Box(new Rect(Mathf.Min(position.x + 20, Screen.width - size.x),
+                        Mathf.Max(0, position.y - size.y), size.x, size.y), mTooltip, tooltipBox);
+                }
             }
 
             public int tabId = 0;
             public string[] tabs = { "Mods", "Logs", "Settings" };
-
-            class Column
-            {
-                public string name;
-                public float width;
-                public bool expand = false;
-                public bool skip = false;
-            }
-
-            private List<Column> mOriginColumns = new List<Column>
-            {
-                new Column {name = "Name", width = 200, expand = true},
-                new Column {name = "Version", width = 60},
-                new Column {name = "Requirements", width = 150, expand = true},
-                new Column {name = "On/Off", width = 50},
-                new Column {name = "Status", width = 50}
-            };
-            private List<Column> mColumns = new List<Column>();
-
-            private Vector2[] mScrollPosition = new Vector2[0];
-            private Vector2 mScrollPositionMax = new Vector2();
 
             private int mPreviousShowModSettings = -1;
             private int mShowModSettings = -1;
@@ -503,16 +500,20 @@ namespace UnityModManagerNet
                     {
                         if (mShowModSettings == -1)
                         {
-                            Hide(modEntries[mPreviousShowModSettings]);
+                            if (mPreviousShowModSettings >= 0 && mPreviousShowModSettings < modEntries.Count)
+                                Hide(modEntries[mPreviousShowModSettings]);
                         }
                         else if (mPreviousShowModSettings == -1)
                         {
-                            Show(modEntries[mShowModSettings]);
+                            if (mShowModSettings < modEntries.Count)
+                                Show(modEntries[mShowModSettings]);
                         }
                         else 
                         {
-                            Hide(modEntries[mPreviousShowModSettings]);
-                            Show(modEntries[mShowModSettings]);
+                            if (mPreviousShowModSettings < modEntries.Count)
+                                Hide(modEntries[mPreviousShowModSettings]);
+                            if (mShowModSettings < modEntries.Count)
+                                Show(modEntries[mShowModSettings]);
                         }
                         mPreviousShowModSettings = mShowModSettings;
                     }
@@ -542,476 +543,6 @@ namespace UnityModManagerNet
             private Vector2 ClampWindowSize(Vector2 orig)
             {
                 return new Vector2(Mathf.Clamp((int)orig.x, Mathf.Min(960, Screen.width), Screen.width), Mathf.Clamp((int)orig.y, Mathf.Min(720, Screen.height), Screen.height));
-            }
-
-            private void WindowFunction(int windowId)
-            {
-                if (Event.current.type == EventType.Repaint)
-                    mTooltip = null;
-
-                if (KeyBinding.Ctrl())
-                    GUI.DragWindow(new Rect(0, 0, 10000, 10000));
-                GUI.DragWindow(new Rect(0, 0, 10000, 20));
-
-                UnityAction buttons = () => { };
-
-                GUILayout.Label("Mod Manager " + version, h1);
-
-                GUILayout.Space(3);
-                GUILayout.BeginHorizontal();
-                int tab = tabId;
-                tab = GUILayout.Toolbar(tab, tabs, button, GUILayout.ExpandWidth(false));
-                if (tab != tabId)
-                {
-                    tabId = tab;
-                }
-                GUILayout.FlexibleSpace();
-                if (tabId == 0)
-                {
-                    GUILayout.Label("Filter:");
-                    mModFilter = GUILayout.TextField(mModFilter, GUILayout.Width(Scale(150)), GUILayout.Height(Scale(20)));
-                    if (GUILayout.Button("X", button, GUILayout.Width(Scale(20)), GUILayout.Height(Scale(20))))
-                    {
-                        mModFilter = "";
-                    }
-                }
-                GUILayout.EndHorizontal();
-
-                GUILayout.Space(5);
-
-                if (mScrollPosition.Length != tabs.Length)
-                    mScrollPosition = new Vector2[tabs.Length];
-
-                DrawTab(tabId, ref buttons);
-
-                GUILayout.FlexibleSpace();
-                GUILayout.Space(5);
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Close", button, GUILayout.ExpandWidth(false)))
-                {
-                    ToggleWindow();
-                }
-
-                if (GUILayout.Button("Save", button, GUILayout.ExpandWidth(false)))
-                {
-                    SaveSettingsAndParams();
-                }
-
-                buttons();
-                GUILayout.EndHorizontal();
-
-                if (mTooltip != null && Event.current.type == EventType.Repaint)
-                {
-                    var size =  tooltipBox.CalcSize(mTooltip) + Vector2.one * 10;
-                    var pos = Event.current.mousePosition;
-                    if (size.x + pos.x < mWindowRect.width)
-                    {
-                        GUI.Box(new Rect(pos.x + 20, pos.y - 25, size.x, size.y), mTooltip.text, tooltipBox);
-                    }
-                    else
-                    {
-                        GUI.Box(new Rect(pos.x - size.x, pos.y - 25, size.x, size.y), mTooltip.text, tooltipBox);
-                    }
-                }
-                else
-                {
-                    GUI.Box(new Rect(-9999, 0, 0, 0), "");
-                }
-            }
-
-            static List<string> mJoinList = new List<string>();
-
-            private void DrawTab(int tabId, ref UnityAction buttons)
-            {
-                var minWidth = GUILayout.MinWidth(mWindowSize.x);
-
-                switch (tabs[tabId])
-                {
-                    case "Mods":
-                        {
-                            mScrollPosition[tabId] = GUILayout.BeginScrollView(mScrollPosition[tabId], minWidth, GUILayout.ExpandHeight(false));
-
-                            var amountWidth = mColumns.Where(x => !x.skip).Sum(x => x.width);
-                            var expandWidth = mColumns.Where(x => x.expand && !x.skip).Sum(x => x.width);
-
-                            var mods = modEntries;
-                            var colWidth = mColumns.Select(x =>
-                                x.expand
-                                    ? GUILayout.Width(x.width / expandWidth * (mWindowSize.x - 60 + expandWidth - amountWidth))
-                                    : GUILayout.Width(x.width)).ToArray();
-
-                            GUILayout.BeginVertical("box");
-
-                            GUILayout.BeginHorizontal("box");
-                            for (int i = 0; i < mColumns.Count; i++)
-                            {
-                                if (mColumns[i].skip)
-                                    continue;
-                                GUILayout.Label(mColumns[i].name, colWidth[i]);
-                            }
-                            
-                            GUILayout.EndHorizontal();
-
-                            for (int i = 0, c = mods.Count; i < c; i++)
-                            {
-                                if (!string.IsNullOrEmpty(mModFilter))
-                                {
-                                    if (!mods[i].Info.DisplayName.ToLower().Contains(mModFilter.ToLower()))
-                                    {
-                                        continue;
-                                    }
-                                }
-                                int col = -1;
-                                GUILayout.BeginVertical("box");
-                                GUILayout.BeginHorizontal();
-
-                                GUILayout.BeginHorizontal(colWidth[++col]);
-                                if (mods[i].OnGUI != null || mods[i].CanReload)
-                                {
-                                    if (GUILayout.Button(mods[i].Info.DisplayName, GUI.skin.label, GUILayout.ExpandWidth(true)))
-                                    {
-                                        ShowModSettings = (ShowModSettings == i) ? -1 : i;
-                                    }
-
-                                    if (GUILayout.Button(ShowModSettings == i ? Textures.SettingsActive : Textures.SettingsNormal, settings))
-                                    {
-                                        ShowModSettings = (ShowModSettings == i) ? -1 : i;
-                                    }
-                                }
-                                else
-                                {
-                                    GUILayout.Label(mods[i].Info.DisplayName);
-                                }
-
-                                if (!string.IsNullOrEmpty(mods[i].Info.HomePage))
-                                {
-                                    GUILayout.Space(10);
-                                    if (GUILayout.Button(Textures.WWW, www))
-                                    {
-                                        Application.OpenURL(mods[i].Info.HomePage);
-                                    }
-                                }
-
-                                if (mods[i].NewestVersion != null)
-                                {
-                                    GUILayout.Space(10);
-                                    GUILayout.Box(Textures.Updates, updates);
-                                }
-
-                                GUILayout.Space(20);
-
-                                GUILayout.EndHorizontal();
-
-                                GUILayout.BeginHorizontal(colWidth[++col]);
-                                GUILayout.Label(mods[i].Info.Version, GUILayout.ExpandWidth(false));
-                                //                            if (string.IsNullOrEmpty(mods[i].Info.Repository))
-                                //                            {
-                                //                                GUI.color = new Color32(255, 81, 83, 255);
-                                //                                GUILayout.Label("*");
-                                //                                GUI.color = Color.white;
-                                //                            }
-                                GUILayout.EndHorizontal();
-
-                                if (mods[i].ManagerVersion > GetVersion())
-                                {
-                                    GUILayout.Label("<color=\"#CD5C5C\">Manager-" + mods[i].Info.ManagerVersion + "</color>", colWidth[++col]);
-                                }
-                                else if (gameVersion != VER_0 && mods[i].GameVersion > gameVersion)
-                                {
-                                    GUILayout.Label("<color=\"#CD5C5C\">Game-" + mods[i].Info.GameVersion + "</color>", colWidth[++col]);
-                                }
-                                else if (mods[i].Requirements.Count > 0)
-                                {
-                                    GUILayout.BeginHorizontal(colWidth[++col]);
-                                    mJoinList.Clear();
-                                    foreach (var item in mods[i].Requirements)
-                                    {
-                                        var id = item.Key;
-                                        var ver = item.Value;
-                                        var foundMod = FindMod(id);
-                                        mJoinList.Add(
-                                            foundMod == null ? "<color=\"#CD5C5C\">" + id + " (Missing)</color> " : 
-                                            !foundMod.Active ? "<color=\"#CD5C5C\">" + id + " (Inactive)</color> " : 
-                                            (ver != null && ver > foundMod.Version) ? "<color=\"#CD5C5C\">" + id + " (Outdated)</color> " : 
-                                            id);
-                                    }
-                                    GUILayout.Label(string.Join(", ", mJoinList.ToArray()));
-                                    GUILayout.EndHorizontal();
-                                }
-                                else if (!string.IsNullOrEmpty(mods[i].CustomRequirements))
-                                {
-                                    GUILayout.Label(mods[i].CustomRequirements, colWidth[++col]);
-                                }
-                                else
-                                {
-                                    GUILayout.Label("-", colWidth[++col]);
-                                }
-
-                                if (!forbidDisableMods)
-                                {
-                                    var action = mods[i].Enabled;
-                                    action = GUILayout.Toggle(action, "", colWidth[++col]);
-                                    if (action != mods[i].Enabled)
-                                    {
-                                        mods[i].Enabled = action;
-                                        if (mods[i].Toggleable)
-                                            mods[i].Active = action;
-                                        else if (action && !mods[i].Loaded)
-                                            mods[i].Active = action;
-                                    }
-                                }
-                                else
-                                {
-                                    GUILayout.Label("", colWidth[++col]);
-                                }
-
-                                if (mods[i].Active)
-                                {
-                                    GUILayout.Box(mods[i].Enabled ? Textures.StatusActive : Textures.StatusNeedRestart, status);
-                                }
-                                else
-                                {
-                                    GUILayout.Box(!mods[i].Enabled ? Textures.StatusInactive : Textures.StatusNeedRestart, status);
-                                }
-                                if (mods[i].ErrorOnLoading)
-                                    GUILayout.Label("!!!");
-
-                                GUILayout.EndHorizontal();
-
-                                if (ShowModSettings == i)
-                                {
-                                    if (mods[i].CanReload)
-                                    {
-                                        GUILayout.Label("Debug", h2);
-                                        if (GUILayout.Button("Reload", button, GUILayout.ExpandWidth(false)))
-                                        {
-                                            mods[i].Reload();
-                                        }
-                                        GUILayout.Space(5);
-                                    }
-                                    if (mods[i].Active && mods[i].OnGUI != null)
-                                    {
-                                        GUILayout.Label("Options", h2);
-                                        try
-                                        {
-                                            mods[i].OnGUI(mods[i]);
-                                        }
-                                        //catch (ExitGUIException e)
-                                        //{
-                                        //    throw e;
-                                        //}
-                                        catch (Exception e)
-                                        {
-                                            mods[i].Logger.LogException("OnGUI", e);
-                                            ShowModSettings = -1;
-                                            GUIUtility.ExitGUI();
-                                        }
-                                    }
-                                }
-
-                                GUILayout.EndVertical();
-                            }
-
-                            GUILayout.EndVertical();
-
-                            GUILayout.EndScrollView();
-
-                            GUILayout.Space(10);
-
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Space(10);
-                            GUILayout.Box(Textures.SettingsNormal, settings);
-                            GUILayout.Space(3);
-                            GUILayout.Label("Options", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(15);
-                            GUILayout.Box(Textures.WWW, www);
-                            GUILayout.Space(3);
-                            GUILayout.Label("Home page", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(15);
-                            GUILayout.Box(Textures.Updates, updates);
-                            GUILayout.Space(3);
-                            GUILayout.Label("Available update", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(15);
-                            GUILayout.Box(Textures.StatusActive, status);
-                            GUILayout.Space(3);
-                            GUILayout.Label("Active", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(10);
-                            GUILayout.Box(Textures.StatusInactive, status);
-                            GUILayout.Space(3);
-                            GUILayout.Label("Inactive", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(10);
-                            GUILayout.Box(Textures.StatusNeedRestart, status);
-                            GUILayout.Space(3);
-                            GUILayout.Label("Need restart", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(10);
-                            GUILayout.Label("!!!", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(3);
-                            GUILayout.Label("Errors", GUILayout.ExpandWidth(false));
-                            GUILayout.Space(10);
-                            GUILayout.Label("[CTRL + LClick]", bold, GUILayout.ExpandWidth(false));
-                            GUILayout.Space(3);
-                            GUILayout.Label("Drag window", GUILayout.ExpandWidth(false));
-                            //                        GUILayout.Space(10);
-                            //                        GUI.color = new Color32(255, 81, 83, 255);
-                            //                        GUILayout.Label("*", bold, GUILayout.ExpandWidth(false));
-                            //                        GUI.color = Color.white;
-                            //                        GUILayout.Space(3);
-                            //                        GUILayout.Label("Not support updates", GUILayout.ExpandWidth(false));
-                            GUILayout.EndHorizontal();
-
-                            if (GUI.changed)
-                            {
-                            }
-
-                            break;
-                        }
-
-                    case "Logs":
-                        {
-                            var scrollToBottom = false;
-                            if (Event.current.type == EventType.repaint)
-                            {
-                                scrollToBottom = mScrollPositionMax == mScrollPosition[tabId];
-                            }
-
-                            mScrollPosition[tabId] = GUILayout.BeginScrollView(mScrollPosition[tabId], minWidth);
-
-                            GUILayout.BeginVertical("box");
-
-                            for (int c = Logger.history.Count, i = Mathf.Max(0, c - Logger.historyCapacity); i < c; i++)
-                            {
-                                GUILayout.Label(Logger.history[i]);
-                            }
-
-                            GUILayout.EndVertical();
-
-                            var verticalHeight = 0f;
-                            if (Event.current.type == EventType.repaint)
-                            {
-                                Rect r = GUILayoutUtility.GetLastRect();
-                                verticalHeight = r.height + r.y * 2;
-                            }
-
-                            GUILayout.EndScrollView();
-
-                            if (Event.current.type == EventType.repaint)
-                            {
-                                Rect r = GUILayoutUtility.GetLastRect();
-                                mScrollPositionMax = new Vector2(0, verticalHeight - r.height);
-
-                                if (scrollToBottom)
-                                {
-                                    mScrollPosition[tabId] = mScrollPositionMax;
-                                }
-                            }
-
-                            buttons += delegate
-                            {
-                                if (GUILayout.Button("Clear", button, GUILayout.ExpandWidth(false)))
-                                {
-                                    Logger.Clear();
-                                }
-                                if (GUILayout.Button("Open detailed log", button, GUILayout.ExpandWidth(false)))
-                                {
-                                    OpenUnityFileLog();
-                                }
-                            };
-
-                            break;
-                        }
-
-                    case "Settings":
-                        {
-                            mScrollPosition[tabId] = GUILayout.BeginScrollView(mScrollPosition[tabId], minWidth);
-
-                            GUILayout.BeginVertical("box");
-
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Label("Hotkey (default Ctrl+F10)", GUILayout.ExpandWidth(false));
-                            DrawKeybindingSmart(Params.Hotkey, "UMM Hotkey", null, GUILayout.ExpandWidth(false));
-                            GUILayout.EndHorizontal();
-
-                            GUILayout.Space(5);
-
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Label("Check updates", GUILayout.ExpandWidth(false));
-                            ToggleGroup(Params.CheckUpdates, mCheckUpdateStrings, i => { Params.CheckUpdates = i; }, null, GUILayout.ExpandWidth(false), GUILayout.ExpandHeight(true));
-                            GUILayout.EndHorizontal();
-
-                            GUILayout.Space(5);
-
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Label("Show this window on startup", GUILayout.ExpandWidth(false));
-                            ToggleGroup(Params.ShowOnStart, mShowOnStartStrings, i => { Params.ShowOnStart = i; }, null, GUILayout.ExpandWidth(false));
-                            GUILayout.EndHorizontal();
-
-                            GUILayout.Space(5);
-
-                            GUILayout.BeginVertical("box");
-                            GUILayout.Label("Window size", bold, GUILayout.ExpandWidth(false));
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Label("Width ", GUILayout.ExpandWidth(false));
-                            mExpectedWindowSize.x = GUILayout.HorizontalSlider(mExpectedWindowSize.x, Mathf.Min(Screen.width, 960), Screen.width, GUILayout.Width(200));
-                            GUILayout.Label(" " + mExpectedWindowSize.x.ToString("f0") + " px ", GUILayout.ExpandWidth(false));
-                            GUILayout.EndHorizontal();
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Label("Height", GUILayout.ExpandWidth(false));
-                            mExpectedWindowSize.y = GUILayout.HorizontalSlider(mExpectedWindowSize.y, Mathf.Min(Screen.height, 720), Screen.height, GUILayout.Width(200));
-                            GUILayout.Label(" " + mExpectedWindowSize.y.ToString("f0") + " px ", GUILayout.ExpandWidth(false));
-                            GUILayout.EndHorizontal();
-                            if (GUILayout.Button("Apply", button, GUILayout.ExpandWidth(false)))
-                            {
-                                mWindowSize.x = (int)mExpectedWindowSize.x;
-                                mWindowSize.y = (int)mExpectedWindowSize.y;
-                                CalculateWindowPos();
-                                Params.WindowWidth = mWindowSize.x;
-                                Params.WindowHeight = mWindowSize.y;
-                            }
-                            GUILayout.EndVertical();
-
-                            GUILayout.Space(5);
-
-                            GUILayout.BeginVertical("box");
-                            GUILayout.Label("UI", bold, GUILayout.ExpandWidth(false));
-                            GUILayout.Label("Font", GUILayout.ExpandWidth(false));
-                            PopupToggleGroup(ref mSelectedFont, mOSfonts, null, GUI.skin.button, GUILayout.Width(200));
-                            GUILayout.BeginHorizontal();
-                            GUILayout.Label("Scale", GUILayout.ExpandWidth(false));
-                            mExpectedUIScale = GUILayout.HorizontalSlider(mExpectedUIScale, 0.5f, 5f, GUILayout.Width(200));
-                            GUILayout.Label(" " + mExpectedUIScale.ToString("f2"), GUILayout.ExpandWidth(false));
-                            GUILayout.EndHorizontal();
-                            if (GUILayout.Button("Apply", button, GUILayout.ExpandWidth(false)))
-                            {
-                                if (mUIScale != mExpectedUIScale || mOSfonts[mSelectedFont] != Params.UIFont)
-                                {
-                                    mUIScaleChanged = true;
-                                    mUIScale = mExpectedUIScale;
-                                    Params.UIScale = mUIScale;
-                                    Params.UIFont = mOSfonts[mSelectedFont];
-                                }
-                            }
-                            GUILayout.EndVertical();
-
-                            GUILayout.Space(5);
-
-                            GUILayout.BeginVertical("box");
-                            GUILayout.Label("Mods Hotkeys", bold, GUILayout.ExpandWidth(false));
-                            var mods = modEntries;
-                            for (int i = 0, c = mods.Count; i < c; i++)
-                            {
-                                GUILayout.BeginHorizontal();
-                                GUILayout.Label($"{mods[i].Info.DisplayName}", GUILayout.Width(200));
-                                DrawKeybindingSmart(mods[i].Hotkey, "Hotkey", null, GUILayout.ExpandWidth(false));
-                                GUILayout.EndHorizontal();
-                                GUILayout.Space(5);
-                            }
-                            GUILayout.EndVertical();
-                            GUILayout.EndVertical();
-                            GUILayout.EndScrollView();
-
-                            break;
-                        }
-                }
             }
 
             private static string[] mCheckUpdateStrings = { "Disabled", "Once a day", "Everytime" };
@@ -1059,7 +590,7 @@ namespace UnityModManagerNet
                 try
                 {
                     mOpened = open;
-                    BlockGameUI(open);
+                    SetUGUIVisible(open);
                     //if (!open)
                     //    SaveSettingsAndParams();
                     if (open)
@@ -1080,33 +611,6 @@ namespace UnityModManagerNet
                 catch (Exception e)
                 {
                     Logger.LogException("ToggleWindow", e);
-                }
-            }
-
-            private GameObject mCanvas = null;
-
-            private void BlockGameUI(bool value)
-            {
-                if (value)
-                {
-                    mCanvas = new GameObject("UMM blocking UI", typeof(Canvas), typeof(GraphicRaycaster));
-                    var canvas = mCanvas.GetComponent<Canvas>();
-                    canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                    canvas.sortingOrder = Int16.MaxValue;
-                    DontDestroyOnLoad(mCanvas);
-                    var panel = new GameObject("Image", typeof(Image));
-                    panel.transform.SetParent(mCanvas.transform);
-                    var rect = panel.GetComponent<RectTransform>();
-                    rect.anchorMin = new Vector2(0, 0);
-                    rect.anchorMax = new Vector2(1, 1);
-                    rect.offsetMin = Vector2.zero;
-                    rect.offsetMax = Vector2.zero;
-                    panel.GetComponent<Image>().color = new Color(0, 0, 0, 0.3f);
-                }
-                else
-                {
-                    if (mCanvas)
-                        Destroy(mCanvas);
                 }
             }
 

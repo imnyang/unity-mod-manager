@@ -314,6 +314,16 @@ namespace UnityModManagerNet
             }
         }
 
+        internal bool ReleasedWithoutModifiers()
+        {
+            if (keyCode == KeyCode.None)
+                return false;
+            if (LegacyInputDisabled)
+                return !hasErrors && KeyControl != KeyControlZero &&
+                    (bool)wasReleasedThisFramePI.GetValue(KeyControl, null);
+            return Input.GetKeyUp(keyCode);
+        }
+
         private readonly static Dictionary<string, string> EnabledKeys = new Dictionary<string, string>
         {
             { "None", "None" },
